@@ -72,6 +72,7 @@ class Scheduler {
     }
  
     public function run() {
+    	$this->newTask($this->ioPollTask()); //添加io阻塞等待协程
         while (!$this->taskQueue->isEmpty()) {
 	        $task = $this->taskQueue->dequeue();
 	        $retval = $task->run();
@@ -137,7 +138,7 @@ class Scheduler {
 	 
 	    $eSocks = []; // dummy
 	 
-	    if (!stream_select($rSocks, $wSocks, $eSocks, $timeout)) {
+	    if (!@stream_select($rSocks, $wSocks, $eSocks, $timeout)) {
 	        return;
 	    }
 	 
@@ -188,6 +189,16 @@ function waitForWrite($socket) {
     );
 }
 
+//重新生成一个任务的的系统调用
+function newTask(Generator $coroutine) {
+    return new SystemCall(
+        function(Task $task, Scheduler $scheduler) use ($coroutine) {
+            $task->setSendValue($scheduler->newTask($coroutine));
+            $scheduler->schedule($task);
+        }
+    );
+}
+
 function server($port) {
     echo "Starting server at port $port...\n";
  
@@ -206,7 +217,6 @@ function server($port) {
 function handleClient($socket) {
     yield waitForRead($socket);
     $data = fread($socket, 8192);
- 
     $msg = "Received following request:\n\n$data";
     $msgLength = strlen($msg);
  
